@@ -1,6 +1,5 @@
 const express = require('express');
 const fs = require('fs');
-const { exec } = require("child_process");
 const pino = require("pino");
 const {
     default: makeWASocket,
@@ -13,20 +12,28 @@ const {
 const { upload } = require('./mega');
 
 const router = express.Router();
+const SESSION_PATH = "/tmp/session"; // Ubah penyimpanan sesi ke /tmp
 
+// Pastikan folder session ada
+if (!fs.existsSync(SESSION_PATH)) {
+    fs.mkdirSync(SESSION_PATH, { recursive: true });
+}
+
+// Fungsi hapus file
 function removeFile(FilePath) {
     if (fs.existsSync(FilePath)) {
         fs.rmSync(FilePath, { recursive: true, force: true });
     }
 }
 
+// API untuk pairing
 router.get('/', async (req, res) => {
     let num = req.query.number;
     if (!num) return res.status(400).json({ error: "Number is required" });
 
     async function EypzPair() {
         try {
-            const { state, saveCreds } = await useMultiFileAuthState(`./session`);
+            const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
 
             let EypzPairWeb = makeWASocket({
                 auth: {
@@ -44,9 +51,8 @@ router.get('/', async (req, res) => {
                 const code = await EypzPairWeb.requestPairingCode(num);
                 
                 if (!res.headersSent) {
-                    res.json({ code });
+                    return res.json({ code });
                 }
-                return;
             }
 
             EypzPairWeb.ev.on('creds.update', saveCreds);
@@ -57,15 +63,13 @@ router.get('/', async (req, res) => {
                 if (connection === "open") {
                     try {
                         await delay(10000);
-                        const auth_path = './session/';
                         const user_jid = jidNormalizedUser(EypzPairWeb.user.id);
-
-                        const mega_url = await upload(fs.createReadStream(auth_path + 'creds.json'), `${user_jid}.json`);
+                        const mega_url = await upload(fs.createReadStream(`${SESSION_PATH}/creds.json`), `${user_jid}.json`);
                         const string_session = mega_url.replace('https://mega.nz/file/', '');
 
                         await EypzPairWeb.sendMessage(user_jid, { text: string_session });
 
-                        removeFile('./session');
+                        removeFile(SESSION_PATH);
                     } catch (error) {
                         console.error("Error sending session link:", error);
                     }
@@ -86,6 +90,7 @@ router.get('/', async (req, res) => {
     EypzPair();
 });
 
+// Tangani error global
 process.on('uncaughtException', (err) => {
     console.error('Unhandled Exception:', err);
 });
