@@ -4,12 +4,20 @@
     {
       "src": "index.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "pair.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
     {
+      "src": "/pair",
+      "dest": "/pair.js"
+    },
+    {
       "src": "/(.*)",
-      "dest": "index.js"
+      "dest": "/index.js"
     }
   ]
 }
