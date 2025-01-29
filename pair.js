@@ -1,7 +1,6 @@
 const express = require('express');
 const fs = require('fs');
 const { exec } = require("child_process");
-let router = express.Router()
 const pino = require("pino");
 const {
     default: makeWASocket,
@@ -13,16 +12,22 @@ const {
 } = require("@whiskeysockets/baileys");
 const { upload } = require('./mega');
 
+const router = express.Router();
+
 function removeFile(FilePath) {
-    if (!fs.existsSync(FilePath)) return false;
-    fs.rmSync(FilePath, { recursive: true, force: true });
+    if (fs.existsSync(FilePath)) {
+        fs.rmSync(FilePath, { recursive: true, force: true });
+    }
 }
 
 router.get('/', async (req, res) => {
     let num = req.query.number;
+    if (!num) return res.status(400).json({ error: "Number is required" });
+
     async function EypzPair() {
-        const { state, saveCreds } = await useMultiFileAuthState(`./session`);
         try {
+            const { state, saveCreds } = await useMultiFileAuthState(`./session`);
+
             let EypzPairWeb = makeWASocket({
                 auth: {
                     creds: state.creds,
@@ -37,60 +42,52 @@ router.get('/', async (req, res) => {
                 await delay(1500);
                 num = num.replace(/[^0-9]/g, '');
                 const code = await EypzPairWeb.requestPairingCode(num);
+                
                 if (!res.headersSent) {
-                    await res.send({ code });
+                    res.json({ code });
                 }
+                return;
             }
 
             EypzPairWeb.ev.on('creds.update', saveCreds);
+
             EypzPairWeb.ev.on("connection.update", async (s) => {
                 const { connection, lastDisconnect } = s;
+
                 if (connection === "open") {
                     try {
                         await delay(10000);
-                        const sessionEypz = fs.readFileSync('./session/creds.json');
-
                         const auth_path = './session/';
                         const user_jid = jidNormalizedUser(EypzPairWeb.user.id);
 
                         const mega_url = await upload(fs.createReadStream(auth_path + 'creds.json'), `${user_jid}.json`);
-
                         const string_session = mega_url.replace('https://mega.nz/file/', '');
 
-                        const sid = string_session;
+                        await EypzPairWeb.sendMessage(user_jid, { text: string_session });
 
-                        const dt = await EypzPairWeb.sendMessage(user_jid, {
-                            text: sid
-                        });
-
-                    } catch (e) {
-                        exec('pm2 restart eypz');
+                        removeFile('./session');
+                    } catch (error) {
+                        console.error("Error sending session link:", error);
                     }
-
-                    await delay(100);
-                    return await removeFile('./session');
-                    process.exit(0);
-                } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
+                } else if (connection === "close" && lastDisconnect?.error?.output?.statusCode !== 401) {
+                    console.log("Reconnecting...");
                     await delay(10000);
                     EypzPair();
                 }
             });
-        } catch (err) {
-            exec('pm2 restart eypz-md');
-            console.log("service restarted");
-            EypzPair();
-            await removeFile('./session');
+        } catch (error) {
+            console.error("Service error:", error);
             if (!res.headersSent) {
-                await res.send({ code: "Service Unavailable" });
+                res.status(503).json({ error: "Service Unavailable" });
             }
         }
     }
-    return await EypzPair();
+
+    EypzPair();
 });
 
-process.on('uncaughtException', function (err) {
-    console.log('Caught exception: ' + err);
-    exec('pm2 restart eypz');
+process.on('uncaughtException', (err) => {
+    console.error('Unhandled Exception:', err);
 });
 
 module.exports = router;
